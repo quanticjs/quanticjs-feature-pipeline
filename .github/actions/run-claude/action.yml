@@ -1,18 +1,37 @@
 # Composite action: run a pipeline prompt headlessly with Claude Code and surface its JSON output.
 # Default engine `claude-code-cli` is implemented and works with ANTHROPIC_API_KEY (no subscription
 # rate limits — parallel sub-agents are fine). The other engines are still skeletons.
+#
+# NOTE: inputs/outputs MUST be block-style. The action-manifest YAML parser rejects `${{ }}` inside
+# flow mappings `{ ... }` (the `}}` collides with the flow-map close brace).
 
 name: run-claude
 description: Run a feature-pipeline prompt headlessly (Claude Code CLI / action / Agent SDK)
 inputs:
-  prompt:  { description: 'Path to the prompt .md', required: true }
-  config:  { description: 'Merged pipeline config (JSON)', required: true }
-  extra:   { description: 'Extra key=val inputs appended to the prompt context', required: false, default: '' }
-  allowed_tools: { description: 'Claude Code --allowedTools value', required: false, default: 'Edit,Write,Read,Bash,Glob,Grep,Task' }
+  prompt:
+    description: Path to the prompt .md
+    required: true
+  config:
+    description: Merged pipeline config (JSON)
+    required: true
+  extra:
+    description: Extra key=val inputs appended to the prompt context
+    required: false
+    default: ''
+  allowed_tools:
+    description: Claude Code --allowedTools value
+    required: false
+    default: Edit,Write,Read,Bash,Glob,Grep,Task
 outputs:
-  json:    { description: "The prompt's JSON output contract (parsed from the model's final message)", value: ${{ steps.run.outputs.json }} }
-  batches: { description: 'Convenience: .batches from the JSON (stage 1)', value: ${{ steps.run.outputs.batches }} }
-  spec_plan: { description: 'Convenience: .spec_plan from the JSON (stage 1)', value: ${{ steps.run.outputs.spec_plan }} }
+  json:
+    description: The prompt's JSON output contract (parsed from the model's final message)
+    value: ${{ steps.run.outputs.json }}
+  batches:
+    description: 'Convenience: .batches from the JSON (stage 1)'
+    value: ${{ steps.run.outputs.batches }}
+  spec_plan:
+    description: 'Convenience: .spec_plan from the JSON (stage 1)'
+    value: ${{ steps.run.outputs.spec_plan }}
 runs:
   using: composite
   steps:
@@ -22,7 +41,6 @@ runs:
     - id: run
       shell: bash
       env:
-        # Either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be present in the job env.
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
       run: |
@@ -47,8 +65,6 @@ runs:
               --permission-mode acceptEdits \
               --allowedTools '${{ inputs.allowed_tools }}' \
               > /tmp/out.json
-            # The CLI envelope wraps the model's final message in .result — that's where the
-            # prompt's "return JSON only" payload lives. Best-effort extract the JSON object from it.
             RESULT="$(jq -r '.result // ""' /tmp/out.json)"
             PAYLOAD="$(printf '%s' "$RESULT" | grep -ozP '(?s)\{.*\}' | tr -d '\0' || echo '{}')"
             ;;
@@ -59,7 +75,6 @@ runs:
           *) echo "unknown engine: $ENGINE"; exit 1 ;;
         esac
 
-        # validate; fall back to empty object so the job fails loudly downstream rather than on jq
         echo "$PAYLOAD" | jq . >/dev/null 2>&1 || PAYLOAD='{}'
         {
           echo "json<<EOF"; echo "$PAYLOAD"; echo "EOF"
