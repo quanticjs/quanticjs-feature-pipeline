@@ -73,14 +73,17 @@ runs:
         case "$ENGINE" in
           claude-code-cli)
             # Headless: skip permission prompts (workspace trusted above); high turn cap for multi-stage work.
+            # `|| rc=$?` is required: under the composite step's default `bash -e`, a non-zero
+            # claude would abort here BEFORE the debug group below runs, hiding out.json/err.log
+            # and making every claude failure undebuggable. Capture the code, always dump, then fail.
+            rc=0
             claude -p "$(cat /tmp/prompt.txt)" \
               ${MODEL:+--model "$MODEL"} \
               --output-format json --verbose --max-turns 300 \
               --dangerously-skip-permissions \
-              > /tmp/out.json 2>/tmp/err.log
-            rc=$?
-            echo "::group::claude output (exit=$rc)"; tail -c 6000 /tmp/out.json 2>/dev/null; echo; echo "--- stderr (tail) ---"; tail -60 /tmp/err.log 2>/dev/null; echo "::endgroup::"
-            if [ "$rc" -ne 0 ]; then echo "::error::claude exited $rc"; exit "$rc"; fi
+              > /tmp/out.json 2>/tmp/err.log || rc=$?
+            echo "::group::claude output (exit=$rc)"; tail -c 8000 /tmp/out.json 2>/dev/null; echo; echo "--- stderr (full) ---"; cat /tmp/err.log 2>/dev/null; echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then echo "::error::claude exited $rc — see the 'claude output' group above (stderr / out.json)"; exit "$rc"; fi
             # `--output-format json --verbose` writes a JSON ARRAY of stream events (the final
             # element is the result object), so `.result` on the top level is a jq runtime error
             # (exit 5) that aborts the whole step under `set -e`. Pull `.result` from the last
