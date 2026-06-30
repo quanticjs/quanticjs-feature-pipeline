@@ -5,11 +5,11 @@
 # A BRD uploaded to the consumer's docs/brd/** runs the WHOLE chain end-to-end (BRD→HLD→FSD) and opens
 # one PR — when gates.brd_upload == end-to-end (default). Set hld-only to gate the HLD before FSD.
 #
-# DRAFT — still to wire before going live (all marked): the run-claude engine branch, the `setup`
-# config-merge/stage-inference, and the __OWNER__ placeholder. See ../../README.md "Going live".
+# DRAFT — still to wire before going live: the `setup`
+# config-merge + stage-inference (the driver workflow is the runnable path). See ../../README.md.
 #
 # NOTE on action refs: a reusable workflow's `uses: ./local` resolves against the CALLER's checkout,
-# not this repo. So composite actions are referenced by FULL path `__OWNER__/quanticjs-feature-pipeline
+# not this repo. So composite actions are referenced by FULL path `quanticjs/quanticjs-feature-pipeline
 # /.github/actions/...@<ref>`, and the pipeline's prompts/templates/config are checked out into .pipeline/.
 
 on:
@@ -27,7 +27,7 @@ permissions:
   pull-requests: write
 
 env:
-  PIPELINE_REPO: __OWNER__/quanticjs-feature-pipeline        # TODO: set to your org/repo
+  PIPELINE_REPO: quanticjs/quanticjs-feature-pipeline   # this repo
 
 jobs:
   # ── setup: fetch the pipeline package, merge config, decide stage ────────────
@@ -65,7 +65,7 @@ jobs:
         run: |
           echo "TODO: for each framework.repos entry (when framework.checkout), clone @ref into .framework/<name>"
           echo "  git clone --depth=1 https://x-access-token:${{ secrets.FRAMEWORK_TOKEN }}@github.com/<repo> .framework/<name>"
-      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         with:
           prompt: .pipeline/prompts/00-brd-to-hld.md
           config: ${{ needs.setup.outputs.cfg }}
@@ -96,7 +96,7 @@ jobs:
         uses: actions/download-artifact@v4
         with: { name: hld, path: docs/hld }
       - id: plan
-        uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         with: { prompt: .pipeline/prompts/10-index-and-template.md, config: ${{ needs.setup.outputs.cfg }} }
 
   # ── STAGE 2 — FSD authoring (matrix: one job per batch) ──────────────────────
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
-      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         with:
           prompt: .pipeline/prompts/11-fsd-author.md
           config: ${{ needs.setup.outputs.cfg }}
@@ -134,7 +134,7 @@ jobs:
           # restore HLD (end-to-end) + all FSD batch outputs into docs/
           [ -d _artifacts/hld ] && rsync -a _artifacts/hld/ docs/hld/ || true
           rsync -a _artifacts/fsd-*/ docs/fsd/ 2>/dev/null || true
-      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/verify-fsd@v1
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/verify-fsd@v1
       - uses: peter-evans/create-pull-request@v6
         with:
           branch: pipeline/hld-fsd
@@ -164,7 +164,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
-      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         with:
           prompt: .pipeline/prompts/20-fsd-to-spec.md
           config: ${{ needs.setup.outputs.cfg }}

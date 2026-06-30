@@ -18,7 +18,7 @@ permissions:
   pull-requests: write
 
 env:
-  PIPELINE_REPO: __OWNER__/quanticjs-feature-pipeline   # TODO: set to your org/repo
+  PIPELINE_REPO: quanticjs/quanticjs-feature-pipeline   # this repo
 
 jobs:
   run:
@@ -54,7 +54,7 @@ jobs:
           done
 
       - name: Run the driver (BRD → HLD → FSD → numbered specs → tracker)
-        uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

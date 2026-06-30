@@ -44,7 +44,7 @@ so there's no fragile cross-job plumbing to debug first. To test:
 1. Set `ANTHROPIC_API_KEY` (recommended — no parallel/rate caps) **or** `CLAUDE_CODE_OAUTH_TOKEN`
    (Max subscription, shared limits) as a repo secret; set `FRAMEWORK_TOKEN` if stage 0 should clone
    the framework repos.
-2. Point the consumer caller at `feature-pipeline.driver.yml`, replace `__OWNER__`, tag this repo `v1`.
+2. Point the consumer caller at `feature-pipeline.driver.yml`, replace `quanticjs`, tag this repo `v1`.
 3. Push a BRD to the consumer's `docs/brd/` → one PR appears with HLD + FSDs + numbered specs + tracker.
 Test on a repo that has **only a BRD** (no existing HLD/FSD) for a clean end-to-end.
 
@@ -90,7 +90,7 @@ dependency order, and banded numbering — for ANY BRD.
    stage from the changed `docs/` dir.
 3. **Implement the framework checkout** step in `brd-to-hld` (clone `framework.repos` into `.framework/`).
 4. **Architect-review `prompts/00-brd-to-hld.md`** before trusting stage 0 (designed, not recalled).
-5. **Replace `__OWNER__`** placeholders (workflow `env.PIPELINE_REPO`, action refs, caller `uses:`), set
+5. Set
    real secrets, and **tag `v1`**.
 
 ## Reference
