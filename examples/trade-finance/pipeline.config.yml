@@ -1,0 +1,14 @@
+# Example CONSUMER override — EDB Trade Finance (the pipeline's first real consumer).
+# Only the keys that differ from config/pipeline.defaults.yml. Everything else inherits the defaults.
+# This file would live at docs/pipeline.config.yml in the consumer repo.
+
+runner:
+  model: claude-opus-4-8        # pin a model for reproducibility
+
+# Trade Finance happened to use every default as-is (module-subprocess-hybrid, spec-aligned,
+# generate-all, banded, 6 authors). It produced 25 FSDs → 92 specs.
+# See ./reference-run.md for the exact decomposition and the verbatim author assignments.
+
+gates:
+  mode: pr-per-stage
+  # reviewers: [edb-trade-architects]   # example: require an architecture team approval per stage

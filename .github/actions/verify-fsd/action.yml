@@ -1,0 +1,21 @@
+# Composite action: structural gate — every FSD must carry the sections /implement-spec consumes.
+# Fails the job (and the FSD PR) if any FSD is missing a required section. Domain-agnostic.
+
+name: verify-fsd
+description: Assert every docs/fsd/**/FSD-*.md has the required /implement-spec sections
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        req=( "## 1. Problem" "## 2. Solution" "## 5. Acceptance Criteria" \
+              "### 6.1 Affected Modules" "### 6.2 Data Model" "### 6.3 API" "### 6.4 Events" \
+              "## 7. Edge Cases" "## 9. Test Plan" "## 11. Specs Produced" )
+        fail=0
+        for f in $(find docs/fsd -name 'FSD-*.md' | sort); do
+          for s in "${req[@]}"; do
+            grep -qF "$s" "$f" || { echo "::error file=$f::missing section [$s]"; fail=1; }
+          done
+        done
+        [ "$fail" = 0 ] && echo "verify-fsd: all FSDs structurally complete" || exit 1

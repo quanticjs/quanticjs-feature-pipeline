@@ -1,0 +1,64 @@
+# feature-pipeline — DEFAULT configuration (domain-agnostic).
+# These are the package defaults. A consuming repo overrides any subset in its own
+# docs/pipeline.config.yml (see examples/trade-finance/pipeline.config.yml).
+# In the live interactive run these values were AskUserQuestion decisions; in CI they are defaults.
+
+fsd:
+  # module-subprocess-hybrid: one FSD per module/foundation, one per shared sub-process, one per product.
+  # alternatives: per-product-end-to-end | coarse-capability
+  decomposition: module-subprocess-hybrid
+
+  # spec-aligned-traceability: each FSD carries the /implement-spec sections + traceability + §11 specs table.
+  # alternative: business-level (no technical design; derive specs later via /specify)
+  template: spec-aligned-traceability
+
+  # generate-all | pilot-first (foundation slice first) | index-only
+  delivery: generate-all
+
+  # banded: leaves numbering headroom per layer (foundation 00-09, subprocess 10-19, capability 20-29,
+  #         product 30-39 — adapt band labels to whatever layers the HLD yields).
+  # alternative: dense (00,01,02,...) — couples number to insertion order; avoid.
+  numbering: banded
+
+  # number of parallel FSD-author jobs/agents in stage 2
+  authors_parallel: 6
+
+spec:
+  granularity: per-fsd-section-11-row   # one docs/specs/SPEC-*.md per FSD §11 row
+  validate: review-spec                 # run /review-spec on each spec, apply -v2 corrections
+
+gates:
+  mode: pr-per-stage                    # pr-per-stage | autopilot (autopilot safe for stage 1 only)
+  reviewers: []                         # GitHub usernames/teams required to approve each stage PR
+  # What a BRD upload runs in ONE workflow run before opening a PR.
+  # end-to-end  → BRD→HLD then HLD→FSD, one combined PR (what "run the entire pipeline" means).
+  # hld-only    → just BRD→HLD; FSD runs after the HLD PR is merged (stricter gating).
+  brd_upload: end-to-end                # end-to-end | hld-only
+
+# QuanticJS platform sources the BRD→HLD stage grounds in (stage 0 only).
+framework:
+  checkout: true                        # in CI, check these repos out read-only for stage 0
+  repos:                                # owner/repo @ ref — adjust owners to your org
+    - quanticjs/quanticjs-backend@main
+    - quanticjs/quanticjs-ui@main
+    - quanticjs/quanticflow@main
+    - quanticjs/notification-engine@main
+  # local interactive runs can instead pass absolute paths:
+  # local_paths:
+  #   - /path/to/quanticjs-backend
+  #   - /path/to/quanticjs-ui
+  #   - /path/to/quanticflow
+  #   - /path/to/notification-engine
+
+runner:
+  engine: claude-code-cli               # claude-code-cli | claude-code-action | claude-agent-sdk
+  model: ''                             # '' = runner default; pin a model id for reproducibility
+
+# Path conventions in the CONSUMING repo. Override if a repo lays docs out differently.
+paths:
+  brd_dir: docs/brd
+  hld_dir: docs/hld
+  fsd_dir: docs/fsd
+  spec_dir: docs/specs
+  rules_dir: .claude/rules              # the quanticjs-standards rules every QuanticJS repo carries
+  config: docs/pipeline.config.yml      # the consumer's override file

@@ -1,0 +1,6 @@
+# pipeline runtime scratch (checked out / produced during a CI run)
+.pipeline/
+.framework/
+_artifacts/
+node_modules/
+*.log

@@ -1,0 +1,45 @@
+# Composite action: run a single pipeline prompt headlessly and surface its JSON output contract.
+# Engine is selectable via the merged config (runner.engine). This is a SKELETON — implement the
+# chosen engine branch before going live. Keep write permission scoped to docs/ only.
+
+name: run-claude
+description: Run a feature-pipeline prompt headlessly (Claude Code CLI / action / Agent SDK)
+inputs:
+  prompt:  { description: 'Path to the prompt .md', required: true }
+  config:  { description: 'Merged pipeline config (JSON)', required: true }
+  extra:   { description: 'Extra key=val inputs appended to the prompt context', required: false, default: '' }
+outputs:
+  json:    { description: "The prompt's JSON output contract", value: ${{ steps.run.outputs.json }} }
+  batches: { description: 'Convenience: .batches from the JSON (stage 1)', value: ${{ steps.run.outputs.batches }} }
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+      run: |
+        set -euo pipefail
+        ENGINE="$(echo '${{ inputs.config }}' | jq -r '.runner.engine // "claude-code-cli"')"
+        MODEL="$(echo '${{ inputs.config }}'  | jq -r '.runner.model // ""')"
+        PROMPT="$(cat '${{ inputs.prompt }}')"
+        CTX="config=${{ inputs.config }}
+        ${{ inputs.extra }}"
+
+        case "$ENGINE" in
+          claude-code-cli)
+            # Headless print mode; writes restricted to docs/. Capture JSON the prompt is told to emit.
+            OUT="$(claude -p "$PROMPT
+
+        CONTEXT:
+        $CTX" ${MODEL:+--model "$MODEL"} --output-format json --permission-mode acceptEdits)"
+            ;;
+          claude-code-action)
+            echo "TODO: delegate to anthropics/claude-code-action and read its result file"; OUT='{}' ;;
+          claude-agent-sdk)
+            echo "TODO: node/python step invoking the Agent SDK with the prompt + CTX"; OUT='{}' ;;
+          *) echo "unknown engine: $ENGINE"; exit 1 ;;
+        esac
+
+        echo "json<<EOF"    >> "$GITHUB_OUTPUT"; echo "$OUT" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
+        echo "batches=$(echo "$OUT" | jq -c '.batches // empty')" >> "$GITHUB_OUTPUT"

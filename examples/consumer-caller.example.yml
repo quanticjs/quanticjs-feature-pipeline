@@ -1,0 +1,28 @@
+# Thin caller — drop this into a CONSUMING product repo at .github/workflows/feature-pipeline.yml.
+# It owns the trigger; the whole engine lives in quanticjs-feature-pipeline via `uses:`.
+# A consumer repo needs only THREE things: this file, docs/pipeline.config.yml, and a BRD in docs/brd/.
+
+name: feature-pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/brd/**'     # upload a BRD     → runs the WHOLE chain end-to-end (BRD→HLD→FSD), one PR
+      - 'docs/hld/**'     # (hld-only mode)  → HLD→FSD after an HLD PR merge
+      - 'docs/fsd/**'     # merge the FSD PR → FSD→SPEC
+  workflow_dispatch:
+    inputs:
+      stage: { description: 'auto|brd-to-hld|hld-to-fsd|fsd-to-spec|implement', type: string, default: auto }
+
+jobs:
+  pipeline:
+    # TODO: replace __OWNER__ with your org; pin @v1 (or a SHA) for reproducibility.
+    uses: __OWNER__/quanticjs-feature-pipeline/.github/workflows/feature-pipeline.reusable.yml@v1
+    with:
+      stage: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'auto' }}
+      config: docs/pipeline.config.yml
+      pipeline_ref: v1
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      FRAMEWORK_TOKEN: ${{ secrets.FRAMEWORK_TOKEN }}   # token that can read the QuanticJS framework repos

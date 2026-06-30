@@ -1,0 +1,187 @@
+# feature-pipeline — REUSABLE workflow (on: workflow_call).
+# Lives in the COMMON pipeline repo (quanticjs-feature-pipeline). Consuming product repos call it with
+# a thin caller (see ../../examples/consumer-caller.example.yml). Domain-agnostic: specifics arrive via `config`.
+#
+# A BRD uploaded to the consumer's docs/brd/** runs the WHOLE chain end-to-end (BRD→HLD→FSD) and opens
+# one PR — when gates.brd_upload == end-to-end (default). Set hld-only to gate the HLD before FSD.
+#
+# DRAFT — still to wire before going live (all marked): the run-claude engine branch, the `setup`
+# config-merge/stage-inference, and the __OWNER__ placeholder. See ../../README.md "Going live".
+#
+# NOTE on action refs: a reusable workflow's `uses: ./local` resolves against the CALLER's checkout,
+# not this repo. So composite actions are referenced by FULL path `__OWNER__/quanticjs-feature-pipeline
+# /.github/actions/...@<ref>`, and the pipeline's prompts/templates/config are checked out into .pipeline/.
+
+on:
+  workflow_call:
+    inputs:
+      stage:        { type: string, default: auto }          # auto|brd-to-hld|hld-to-fsd|fsd-to-spec|implement
+      config:       { type: string, default: docs/pipeline.config.yml }
+      pipeline_ref: { type: string, default: v1 }            # ref of THIS repo to fetch prompts/actions from
+    secrets:
+      ANTHROPIC_API_KEY: { required: false }                 # required unless Bedrock/Vertex creds used
+      FRAMEWORK_TOKEN:   { required: false }                 # PAT/app token that can read the framework repos
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PIPELINE_REPO: __OWNER__/quanticjs-feature-pipeline        # TODO: set to your org/repo
+
+jobs:
+  # ── setup: fetch the pipeline package, merge config, decide stage ────────────
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      stage:      ${{ steps.s.outputs.stage }}
+      cfg:        ${{ steps.s.outputs.cfg }}        # merged config JSON
+      brd_upload: ${{ steps.s.outputs.brd_upload }} # end-to-end | hld-only
+    steps:
+      - uses: actions/checkout@v4                   # the CONSUMER repo (BRD/HLD/FSD live here)
+      - uses: actions/checkout@v4                   # THIS pipeline repo → .pipeline/
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - id: s
+        run: |
+          # merge .pipeline/config/pipeline.defaults.yml  <-  ${{ inputs.config }}  (consumer wins)
+          # then infer stage: dispatch input wins; else from the changed top-level docs/ dir:
+          #   docs/brd/* → brd-to-hld    docs/hld/* → hld-to-fsd    docs/fsd/* → fsd-to-spec
+          echo "TODO: yq merge + stage inference (keep identical to the interactive run)"
+          echo "stage=${{ inputs.stage }}" >> "$GITHUB_OUTPUT"
+          echo "cfg={}" >> "$GITHUB_OUTPUT"
+          echo "brd_upload=end-to-end" >> "$GITHUB_OUTPUT"
+
+  # ── STAGE 0 — BRD → HLD (grounds in the QuanticJS framework repos) ───────────
+  brd-to-hld:
+    needs: setup
+    if: needs.setup.outputs.stage == 'brd-to-hld'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      # check out the framework sources read-only so the HLD is grounded in real capabilities
+      - name: Checkout framework sources
+        run: |
+          echo "TODO: for each framework.repos entry (when framework.checkout), clone @ref into .framework/<name>"
+          echo "  git clone --depth=1 https://x-access-token:${{ secrets.FRAMEWORK_TOKEN }}@github.com/<repo> .framework/<name>"
+      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        with:
+          prompt: .pipeline/prompts/00-brd-to-hld.md
+          config: ${{ needs.setup.outputs.cfg }}
+          extra: 'framework_dir=.framework'
+      # end-to-end: do NOT open a PR here; fall through to the FSD jobs and open one combined PR.
+      - if: needs.setup.outputs.brd_upload == 'hld-only'
+        uses: peter-evans/create-pull-request@v6
+        with: { branch: pipeline/hld, title: 'pipeline: HLD from BRD', add-paths: docs/hld/** }
+      - if: needs.setup.outputs.brd_upload == 'end-to-end'
+        uses: actions/upload-artifact@v4
+        with: { name: hld, path: docs/hld/** }
+
+  # ── STAGE 1 — HLD → FSD index + batch plan ───────────────────────────────────
+  hld-to-fsd-index:
+    needs: [setup, brd-to-hld]
+    # runs when: explicitly hld-to-fsd, OR end-to-end continuation after brd-to-hld
+    if: |
+      always() &&
+      (needs.setup.outputs.stage == 'hld-to-fsd' ||
+       (needs.setup.outputs.stage == 'brd-to-hld' && needs.setup.outputs.brd_upload == 'end-to-end' && needs.brd-to-hld.result == 'success'))
+    runs-on: ubuntu-latest
+    outputs: { batches: ${{ steps.plan.outputs.batches }} }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - if: needs.setup.outputs.stage == 'brd-to-hld'   # pull HLD produced upstream in this run
+        uses: actions/download-artifact@v4
+        with: { name: hld, path: docs/hld }
+      - id: plan
+        uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        with: { prompt: .pipeline/prompts/10-index-and-template.md, config: ${{ needs.setup.outputs.cfg }} }
+
+  # ── STAGE 2 — FSD authoring (matrix: one job per batch) ──────────────────────
+  hld-to-fsd-authors:
+    needs: [setup, hld-to-fsd-index]
+    if: always() && needs.hld-to-fsd-index.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 6
+      matrix: { batch: ${{ fromJSON(needs.hld-to-fsd-index.outputs.batches) }} }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        with:
+          prompt: .pipeline/prompts/11-fsd-author.md
+          config: ${{ needs.setup.outputs.cfg }}
+          extra: 'assignment=${{ toJSON(matrix.batch) }}'
+      - uses: actions/upload-artifact@v4
+        with: { name: fsd-${{ matrix.batch.name }}, path: docs/fsd/** }
+
+  # ── collect HLD + FSD and open ONE PR (the human gate) ───────────────────────
+  fsd-pr:
+    needs: [setup, brd-to-hld, hld-to-fsd-authors]
+    if: always() && needs.hld-to-fsd-authors.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - uses: actions/download-artifact@v4
+        with: { path: _artifacts }
+      - run: |
+          # restore HLD (end-to-end) + all FSD batch outputs into docs/
+          [ -d _artifacts/hld ] && rsync -a _artifacts/hld/ docs/hld/ || true
+          rsync -a _artifacts/fsd-*/ docs/fsd/ 2>/dev/null || true
+      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/verify-fsd@v1
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: pipeline/hld-fsd
+          title: 'pipeline: HLD + FSD from BRD'
+          body: 'End-to-end stage 0→2 output. Review HLD and FSDs; merging triggers FSD→SPEC.'
+          add-paths: |
+            docs/hld/**
+            docs/fsd/**
+
+  # ── STAGE 3 — FSD → SPEC (matrix: one job per FSD) ───────────────────────────
+  list-fsds:
+    needs: setup
+    if: needs.setup.outputs.stage == 'fsd-to-spec'
+    runs-on: ubuntu-latest
+    outputs: { files: ${{ steps.l.outputs.files }} }
+    steps:
+      - uses: actions/checkout@v4
+      - id: l
+        run: echo "files=$(ls docs/fsd/**/FSD-*.md | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  fsd-to-spec:
+    needs: [setup, list-fsds]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { fsd: ${{ fromJSON(needs.list-fsds.outputs.files) }} }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        with:
+          prompt: .pipeline/prompts/20-fsd-to-spec.md
+          config: ${{ needs.setup.outputs.cfg }}
+          extra: 'fsd=${{ matrix.fsd }}'
+      - uses: actions/upload-artifact@v4
+        with: { name: specs, path: docs/specs/** }
+
+  fsd-to-spec-pr:
+    needs: fsd-to-spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: specs, path: docs/specs }
+      - uses: peter-evans/create-pull-request@v6
+        with: { branch: pipeline/specs, title: 'pipeline: specs from FSDs', add-paths: docs/specs/** }
+
+  # ── STAGE 4 — SPEC → code (dispatch-only; respects FSD README dependency order) ──
+  # Invokes the quanticjs-scaffolding /implement-spec skill per SPEC on its own branch.
+  # Kept manual: implementation is the expensive, serial step. TODO: model the dependency DAG.
