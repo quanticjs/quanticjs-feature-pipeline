@@ -22,10 +22,13 @@ Pull only the slice of the FSD relevant to this row:
 - the §11 row's declared `/implement-spec` sub-skills.
 
 ## Output — write the spec file in EXACTLY this shape
-`/implement-spec` extracts these sections by name — do not rename or drop any:
+`/implement-spec` extracts these sections by name — do not rename or drop any. The first line after the
+title is a **provenance header** (a blockquote) so the spec's source FSD is obvious at a glance:
 
 ```markdown
 # Feature: <name>
+
+> **↳ Source FSD:** [<FSD-NN> — <FSD title>](<relative path to the FSD, e.g. ../fsd/foundation/FSD-NN-...md>) · **Spec <number>** (build order) · **Depends on:** <prerequisite spec numbers, comma-listed, or "none">
 
 ## Problem
 <from the FSD §1 + the BRD refs for this slice>
@@ -51,6 +54,11 @@ Pull only the slice of the FSD relevant to this row:
 ```
 
 ## Rules
+- **Provenance header is mandatory** — emit it as the first blockquote after the title. The link is the
+  relative path from `docs/specs/` to the source FSD file; `Depends on` is the prerequisite spec numbers
+  (same as the `depends_on` in the output contract), or `none`. This keeps a flat `docs/specs/` folder
+  traceable to its FSDs without nesting (which would fragment the global build order and break the
+  flat `/implement-spec` discovery).
 - Keep the spec small enough to implement in one `/implement-spec` pass. If a §11 row is too big, note
   it and propose a split — do not silently merge scope.
 - Stay rule-compliant (same constraints as the FSD §6). The spec must not introduce a pattern the FSD

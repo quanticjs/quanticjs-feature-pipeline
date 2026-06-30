@@ -28,8 +28,10 @@ You are the orchestrator. Execute the stages in order, applying `<config>` decis
 3. **FSD authoring (parallel)** — for each batch in the stage-1 plan, **spawn a sub-agent** (Task tool,
    up to `fsd.authors_parallel` concurrent) following `prompts/11-fsd-author.md`. Each writes its FSDs.
 4. **FSD → numbered specs (parallel)** — for each FSD, **spawn a sub-agent** following
-   `prompts/20-fsd-to-spec.md`, naming files `SPEC-<number>-<slug>.md` from `spec_plan`. Collect each
-   sub-agent's tracker metadata.
+   `prompts/20-fsd-to-spec.md`, naming files `SPEC-<number>-<slug>.md` from `spec_plan`. Each spec
+   carries the mandatory **provenance header** (linked source FSD + spec number + deps) as its first
+   blockquote — so the flat `docs/specs/` folder stays traceable to its FSDs. Collect each sub-agent's
+   tracker metadata.
 5. **Finalize the tracker** — fill `docs/specs/TRACKER.md` rows from the collected metadata (FSD,
    depends_on, sub-skills) in build order; set every Status to ☐ Not started; update the progress
    roll-up. Flag any cross-spec overlaps (e.g. a module's `forRoot` claimed by two specs).
