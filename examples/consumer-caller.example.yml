@@ -18,11 +18,17 @@ on:
 jobs:
   pipeline:
     # TODO: replace __OWNER__ with your org; pin @v1 (or a SHA) for reproducibility.
-    uses: __OWNER__/quanticjs-feature-pipeline/.github/workflows/feature-pipeline.reusable.yml@v1
+    #
+    # TESTING / simplest path — the single-invocation DRIVER (one Claude run does the whole chain,
+    # fanning out to sub-agents internally; opens one PR with HLD + FSD + numbered specs + TRACKER.md):
+    uses: __OWNER__/quanticjs-feature-pipeline/.github/workflows/feature-pipeline.driver.yml@v1
+    #
+    # SCALED path — the multi-job matrix workflow (stage/gate aware); swap the line above for:
+    # uses: __OWNER__/quanticjs-feature-pipeline/.github/workflows/feature-pipeline.reusable.yml@v1
     with:
-      stage: ${{ github.event_name == 'workflow_dispatch' && inputs.stage || 'auto' }}
       config: docs/pipeline.config.yml
       pipeline_ref: v1
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      FRAMEWORK_TOKEN: ${{ secrets.FRAMEWORK_TOKEN }}   # token that can read the QuanticJS framework repos
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}        # API key — no parallel/rate-limit caps
+      # or CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # Max subscription (shared limits)
+      FRAMEWORK_TOKEN: ${{ secrets.FRAMEWORK_TOKEN }}            # reads the QuanticJS framework repos (stage 0)

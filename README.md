@@ -17,16 +17,36 @@ capabilities, not guesses.
 ## Repo layout
 
 ```
-.github/workflows/feature-pipeline.reusable.yml   on: workflow_call — THE ENGINE (consumers `uses:` this)
-.github/actions/run-claude/                        headless runner (engine-selectable)
+.github/workflows/feature-pipeline.driver.yml     on: workflow_call — SINGLE-INVOCATION driver (best for testing)
+.github/workflows/feature-pipeline.reusable.yml   on: workflow_call — multi-job matrix engine (scaled)
+.github/actions/run-claude/                        headless runner (claude-code-cli implemented; API key or OAuth)
 .github/actions/verify-fsd/                         structural gate (required /implement-spec sections)
-prompts/   00-brd-to-hld · 10-index-and-template · 11-fsd-author · 20-fsd-to-spec   (all domain-agnostic)
+prompts/   driver · 00-brd-to-hld · 10-index-and-template · 11-fsd-author · 20-fsd-to-spec   (all domain-agnostic)
 templates/_TEMPLATE.fsd.md                          canonical FSD template seed
-config/pipeline.defaults.yml                        defaults (decomposition, gates, framework, runner, paths)
+config/pipeline.defaults.yml                        defaults (decomposition, gates, framework, spec numbering/tracker, runner, paths)
 examples/
   consumer-caller.example.yml                       the thin caller a product repo drops in
   trade-finance/                                     first real consumer (config + lossless reference run)
 ```
+
+## Outputs: numbered specs + a tracker
+
+Stage 1 assigns every spec a 3-digit **build-order number** (`spec.numbering: build-order`) and seeds
+**`docs/specs/TRACKER.md`** (`spec.tracker: true`) — the status + dependency index. Stage 3 writes
+`SPEC-<number>-<slug>.md` and fills the tracker rows (FSD, depends-on, sub-skills, Status ☐). Implement
+in ascending number; flip Status as PRs merge. This mirrors how the Trade-Finance consumer's 31
+foundation specs are tracked.
+
+## Test it (driver path)
+
+The `driver.yml` workflow runs the whole chain in ONE Claude Code invocation (sub-agent fan-out inside),
+so there's no fragile cross-job plumbing to debug first. To test:
+1. Set `ANTHROPIC_API_KEY` (recommended — no parallel/rate caps) **or** `CLAUDE_CODE_OAUTH_TOKEN`
+   (Max subscription, shared limits) as a repo secret; set `FRAMEWORK_TOKEN` if stage 0 should clone
+   the framework repos.
+2. Point the consumer caller at `feature-pipeline.driver.yml`, replace `__OWNER__`, tag this repo `v1`.
+3. Push a BRD to the consumer's `docs/brd/` → one PR appears with HLD + FSDs + numbered specs + tracker.
+Test on a repo that has **only a BRD** (no existing HLD/FSD) for a clean end-to-end.
 
 ## Using it from a product repo (the consumer contract)
 

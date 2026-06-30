@@ -26,6 +26,10 @@ fsd:
 spec:
   granularity: per-fsd-section-11-row   # one docs/specs/SPEC-*.md per FSD §11 row
   validate: review-spec                 # run /review-spec on each spec, apply -v2 corrections
+  # numbering: filenames carry a zero-padded sequence in BUILD (dependency) order →
+  #   SPEC-NNN-<slug>.md (e.g. SPEC-001-backend-bootstrap.md). 'none' = bare SPEC-<slug>.md.
+  numbering: build-order                # build-order | none
+  tracker: true                         # also write/maintain docs/specs/TRACKER.md (status + deps index)
 
 gates:
   mode: pr-per-stage                    # pr-per-stage | autopilot (autopilot safe for stage 1 only)

@@ -1,6 +1,6 @@
-# Composite action: run a single pipeline prompt headlessly and surface its JSON output contract.
-# Engine is selectable via the merged config (runner.engine). This is a SKELETON — implement the
-# chosen engine branch before going live. Keep write permission scoped to docs/ only.
+# Composite action: run a pipeline prompt headlessly with Claude Code and surface its JSON output.
+# Default engine `claude-code-cli` is implemented and works with ANTHROPIC_API_KEY (no subscription
+# rate limits — parallel sub-agents are fine). The other engines are still skeletons.
 
 name: run-claude
 description: Run a feature-pipeline prompt headlessly (Claude Code CLI / action / Agent SDK)
@@ -8,38 +8,61 @@ inputs:
   prompt:  { description: 'Path to the prompt .md', required: true }
   config:  { description: 'Merged pipeline config (JSON)', required: true }
   extra:   { description: 'Extra key=val inputs appended to the prompt context', required: false, default: '' }
+  allowed_tools: { description: 'Claude Code --allowedTools value', required: false, default: 'Edit,Write,Read,Bash,Glob,Grep,Task' }
 outputs:
-  json:    { description: "The prompt's JSON output contract", value: ${{ steps.run.outputs.json }} }
+  json:    { description: "The prompt's JSON output contract (parsed from the model's final message)", value: ${{ steps.run.outputs.json }} }
   batches: { description: 'Convenience: .batches from the JSON (stage 1)', value: ${{ steps.run.outputs.batches }} }
+  spec_plan: { description: 'Convenience: .spec_plan from the JSON (stage 1)', value: ${{ steps.run.outputs.spec_plan }} }
 runs:
   using: composite
   steps:
+    - name: Install Claude Code
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
     - id: run
       shell: bash
       env:
+        # Either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be present in the job env.
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
       run: |
         set -euo pipefail
         ENGINE="$(echo '${{ inputs.config }}' | jq -r '.runner.engine // "claude-code-cli"')"
-        MODEL="$(echo '${{ inputs.config }}'  | jq -r '.runner.model // ""')"
-        PROMPT="$(cat '${{ inputs.prompt }}')"
-        CTX="config=${{ inputs.config }}
-        ${{ inputs.extra }}"
+        MODEL="$(echo  '${{ inputs.config }}' | jq -r '.runner.model  // ""')"
+
+        # Assemble the full prompt = the stage prompt + the merged config + any extra context.
+        {
+          cat '${{ inputs.prompt }}'
+          printf '\n\n---\nCONTEXT (JSON config + inputs):\n'
+          printf 'config=%s\n' '${{ inputs.config }}'
+          printf '%s\n' '${{ inputs.extra }}'
+        } > /tmp/prompt.txt
 
         case "$ENGINE" in
           claude-code-cli)
-            # Headless print mode; writes restricted to docs/. Capture JSON the prompt is told to emit.
-            OUT="$(claude -p "$PROMPT
-
-        CONTEXT:
-        $CTX" ${MODEL:+--model "$MODEL"} --output-format json --permission-mode acceptEdits)"
+            # Headless print mode, JSON envelope. acceptEdits lets it write files into the workspace.
+            claude -p "$(cat /tmp/prompt.txt)" \
+              ${MODEL:+--model "$MODEL"} \
+              --output-format json \
+              --permission-mode acceptEdits \
+              --allowedTools '${{ inputs.allowed_tools }}' \
+              > /tmp/out.json
+            # The CLI envelope wraps the model's final message in .result — that's where the
+            # prompt's "return JSON only" payload lives. Best-effort extract the JSON object from it.
+            RESULT="$(jq -r '.result // ""' /tmp/out.json)"
+            PAYLOAD="$(printf '%s' "$RESULT" | grep -ozP '(?s)\{.*\}' | tr -d '\0' || echo '{}')"
             ;;
           claude-code-action)
-            echo "TODO: delegate to anthropics/claude-code-action and read its result file"; OUT='{}' ;;
+            echo "TODO: delegate to anthropics/claude-code-action and read its result file"; PAYLOAD='{}' ;;
           claude-agent-sdk)
-            echo "TODO: node/python step invoking the Agent SDK with the prompt + CTX"; OUT='{}' ;;
+            echo "TODO: node/python step invoking the Agent SDK"; PAYLOAD='{}' ;;
           *) echo "unknown engine: $ENGINE"; exit 1 ;;
         esac
 
-        echo "json<<EOF"    >> "$GITHUB_OUTPUT"; echo "$OUT" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
-        echo "batches=$(echo "$OUT" | jq -c '.batches // empty')" >> "$GITHUB_OUTPUT"
+        # validate; fall back to empty object so the job fails loudly downstream rather than on jq
+        echo "$PAYLOAD" | jq . >/dev/null 2>&1 || PAYLOAD='{}'
+        {
+          echo "json<<EOF"; echo "$PAYLOAD"; echo "EOF"
+          echo "batches=$(echo "$PAYLOAD"   | jq -c '.batches   // empty')"
+          echo "spec_plan=$(echo "$PAYLOAD" | jq -c '.spec_plan // empty')"
+        } >> "$GITHUB_OUTPUT"

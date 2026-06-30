@@ -1,0 +1,77 @@
+# feature-pipeline — DRIVER workflow (single-invocation, on: workflow_call).
+# The simplest runnable path: one Claude Code invocation runs the WHOLE chain (BRD→HLD→FSD→numbered
+# specs→tracker), fanning out to sub-agents internally. Best for TESTING a BRD upload with an API key.
+# The matrix workflow (feature-pipeline.reusable.yml) is the scaled, multi-job variant.
+
+on:
+  workflow_call:
+    inputs:
+      config:       { type: string, default: docs/pipeline.config.yml }
+      pipeline_ref: { type: string, default: v1 }
+    secrets:
+      ANTHROPIC_API_KEY:       { required: false }   # set one of these two
+      CLAUDE_CODE_OAUTH_TOKEN:  { required: false }
+      FRAMEWORK_TOKEN:          { required: false }   # reads the QuanticJS framework repos for stage 0
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PIPELINE_REPO: __OWNER__/quanticjs-feature-pipeline   # TODO: set to your org/repo
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4                         # the consumer repo (BRD here; HLD/FSD/specs land here)
+      - uses: actions/checkout@v4                         # the pipeline package → .pipeline/
+        with: { repository: '${{ env.PIPELINE_REPO }}', ref: '${{ inputs.pipeline_ref }}', path: .pipeline }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: Merge config (defaults <- consumer overrides)
+        id: cfg
+        run: |
+          # defaults from the package, overridden by the consumer file if present
+          if [ -f "${{ inputs.config }}" ]; then
+            yq -o=json eval-all '. as $i ireduce ({}; . * $i)' .pipeline/config/pipeline.defaults.yml "${{ inputs.config }}" > /tmp/cfg.json
+          else
+            yq -o=json '.' .pipeline/config/pipeline.defaults.yml > /tmp/cfg.json
+          fi
+          echo "json=$(jq -c . /tmp/cfg.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout framework sources (stage-0 grounding)
+        run: |
+          set -e
+          [ "$(jq -r '.framework.checkout // false' /tmp/cfg.json)" = "true" ] || { echo "framework.checkout disabled"; exit 0; }
+          mkdir -p .framework
+          for entry in $(jq -r '.framework.repos[]?' /tmp/cfg.json); do
+            repo="${entry%@*}"; ref="${entry##*@}"; name="${repo##*/}"
+            git clone --depth=1 --branch "$ref" \
+              "https://x-access-token:${{ secrets.FRAMEWORK_TOKEN }}@github.com/${repo}.git" ".framework/${name}" || \
+              echo "::warning::could not clone ${repo} (HLD grounding will fall back to .claude/rules)"
+          done
+
+      - name: Run the driver (BRD → HLD → FSD → numbered specs → tracker)
+        uses: __OWNER__/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/driver.md
+          config: ${{ steps.cfg.outputs.json }}
+          extra: 'framework_dir=.framework'
+
+      - name: Open the result PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: pipeline/brd-run
+          title: 'pipeline: HLD + FSD + specs from BRD'
+          body: |
+            End-to-end driver run from a BRD upload.
+            Review the HLD, FSDs, numbered specs, and `docs/specs/TRACKER.md`.
+          add-paths: |
+            docs/hld/**
+            docs/fsd/**
+            docs/specs/**

@@ -4,8 +4,14 @@
 single `docs/specs/SPEC-<slug>.md` that `/implement-spec` can consume directly.
 
 ## Inputs
-- The FSD file path and the target `SPEC-<slug>` (one §11 row).
+- The FSD file path and the target spec for one §11 row: its `slug`, and (when `spec.numbering:
+  build-order`) its assigned 3-digit `number` from the stage-1 `spec_plan`.
 - `docs/fsd/README.md` (conventions) and `.claude/rules/*.md`.
+
+## Filename
+- `spec.numbering: build-order` → write `docs/specs/SPEC-<number>-<slug>.md` (e.g. `SPEC-001-backend-bootstrap.md`).
+- `spec.numbering: none` → write `docs/specs/SPEC-<slug>.md`.
+The slug is always kept so cross-references resolve.
 
 ## What to extract from the FSD for THIS spec
 Pull only the slice of the FSD relevant to this row:
@@ -14,7 +20,7 @@ Pull only the slice of the FSD relevant to this row:
 - the relevant Edge Cases and Test Plan lines,
 - the §11 row's declared `/implement-spec` sub-skills.
 
-## Output — write `docs/specs/SPEC-<slug>.md` in EXACTLY this shape
+## Output — write the spec file in EXACTLY this shape
 `/implement-spec` extracts these sections by name — do not rename or drop any:
 
 ```markdown
@@ -52,4 +58,9 @@ Pull only the slice of the FSD relevant to this row:
 - After writing, recommend running `/review-spec SPEC-<slug>.md` and applying the `-v2` corrections.
 
 ## Output contract
-Return JSON only: `{ "spec": "docs/specs/SPEC-<slug>.md", "subskills": ["add-handler", ...] }`.
+Return JSON only — this row's tracker metadata (the tracker job aggregates these):
+```json
+{ "spec": "docs/specs/SPEC-<number>-<slug>.md", "number": "001", "slug": "<slug>",
+  "fsd": "FSD-NN", "depends_on": ["001", ...], "subskills": ["add-handler", ...], "acs": <int> }
+```
+`depends_on` lists the prerequisite spec NUMBERS you named in `### Affected Modules` (build order).
