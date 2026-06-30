@@ -12,9 +12,13 @@ supplies the domain; you supply the architecture, grounded in the actual capabil
 - **The BRD** — `<brd_glob>` (PDF/DOCX/MD under `paths.brd_dir`). **Read it fully**, including tables,
   appendices, and requirement-id lists (`HLR-*`, `LLR-*`, `E-*`, `§x.y` or whatever scheme the BRD uses).
   For PDFs, read page-by-page; do not skim.
-- **The QuanticJS platform sources** — `<framework_sources>` (paths or checked-out repos). These are the
-  ground truth for "what the platform can actually do". Consult each one's README, docs/, rules, package
-  exports, and skill/scaffolding catalogs — do NOT read entire repos; target capability surfaces:
+- **The QuanticJS platform sources** — the repos under **`framework_dir`** (passed in the CONTEXT
+  block; default `.framework/`), which the runner clones from **`config.framework.repos`** in CI, or
+  the absolute paths in **`config.framework.local_paths`** for local runs. If neither is present, fall
+  back to `<rules_dir>` + `CLAUDE.md` alone (and note in the HLD that platform grounding was rules-only).
+  These are the ground truth for "what the platform can actually do". Consult each repo's README, docs/,
+  rules, package exports, and skill/scaffolding catalogs — do NOT read entire repos; target capability
+  surfaces:
   | Source | What to take from it |
   |---|---|
   | `quanticjs-backend` | NestJS modular-monolith + CQRS pipeline, `Result<T>`, `@Validate`, multi-issuer auth, tenancy/RLS, outbox/inbox eventing, `@quanticjs/*` backend packages, `bootstrapService` |

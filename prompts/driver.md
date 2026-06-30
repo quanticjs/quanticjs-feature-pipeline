@@ -12,7 +12,9 @@ You are the orchestrator. Execute the stages in order, applying `<config>` decis
 ## Inputs
 - `<config>` — merged pipeline config (defaults + consumer overrides).
 - `<brd_glob>`, `<hld_dir>`, `<fsd_dir>`, `<spec_dir>`, `<rules_dir>` — from `config.paths`.
-- `<framework_dir>` — checked-out QuanticJS framework repos for stage 0 grounding (if present).
+- `framework_dir` (from the CONTEXT block; default `.framework/`) — the QuanticJS framework repos the
+  runner cloned from `config.framework.repos` for stage-0 grounding; or `config.framework.local_paths`
+  locally. Absent → stage 0 grounds on `<rules_dir>` + `CLAUDE.md` only.
 - Sibling prompts: `prompts/00-brd-to-hld.md`, `10-index-and-template.md`, `11-fsd-author.md`,
   `20-fsd-to-spec.md`. Read each at the stage it applies.
 
