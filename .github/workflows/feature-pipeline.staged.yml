@@ -1,5 +1,5 @@
-# feature-pipeline — STAGED workflow (on: workflow_call). 3 sequential stages, RESUMABLE:
-#   1) BRD -> HLD     2) HLD -> FSD     3) FSD -> Specs
+# feature-pipeline — STAGED workflow (on: workflow_call). 4 sequential stages, RESUMABLE:
+#   1) BRD -> HLD     2) HLD -> FSD     3) FSD -> Specs     4) Spec Review
 # Each stage reads the previous stage's output from a persistent WORK BRANCH (inputs.work_branch)
 # and commits its own output back to it. Any stage can therefore be re-run independently via
 # `start_stage` WITHOUT rerunning earlier stages — the prior output is read from the branch, not
@@ -17,7 +17,7 @@ on:
         type: string
         default: v1
       start_stage:
-        description: 'Entry stage: brd-to-hld | hld-to-fsd | fsd-to-spec. Earlier stages are skipped; their output is read from the work branch.'
+        description: 'Entry stage: brd-to-hld | hld-to-fsd | fsd-to-spec | spec-review. Earlier stages are skipped; their output is read from the work branch.'
         type: string
         default: brd-to-hld
       work_branch:
@@ -61,8 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ inputs.start_stage }}" in
-            brd-to-hld|hld-to-fsd|fsd-to-spec) echo "start_stage=${{ inputs.start_stage }}" ;;
-            *) echo "::error::invalid start_stage '${{ inputs.start_stage }}' (expected brd-to-hld | hld-to-fsd | fsd-to-spec)"; exit 1 ;;
+            brd-to-hld|hld-to-fsd|fsd-to-spec|spec-review) echo "start_stage=${{ inputs.start_stage }}" ;;
+            *) echo "::error::invalid start_stage '${{ inputs.start_stage }}' (expected brd-to-hld | hld-to-fsd | fsd-to-spec | spec-review)"; exit 1 ;;
           esac
       - id: m
         run: |
@@ -185,7 +185,7 @@ jobs:
   # ── STAGE 3 — FSD -> Specs ───────────────────────────────────────────────────
   fsd-to-spec:
     needs: [config, hld-to-fsd]
-    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.hld-to-fsd.result == 'success' || needs.hld-to-fsd.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.hld-to-fsd.result == 'success' || needs.hld-to-fsd.result == 'skipped') && inputs.start_stage != 'spec-review' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -236,10 +236,58 @@ jobs:
           path: docs/specs
           if-no-files-found: warn
 
-  # ── open ONE PR (head = work branch) with HLD + FSD + Specs ───────────────────
+  # ── STAGE 4 — Spec Review (review every spec vs .claude/rules, correct in place) ──
+  spec-review:
+    needs: [config, fsd-to-spec]
+    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.fsd-to-spec.result == 'success' || needs.fsd-to-spec.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check out the work branch (must exist; carries docs/specs)
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.work_branch }}" || true
+          if ! git rev-parse --verify "origin/${{ inputs.work_branch }}" >/dev/null 2>&1; then
+            echo "::error::work branch '${{ inputs.work_branch }}' not found — run earlier stages first."; exit 1
+          fi
+          git checkout -B "${{ inputs.work_branch }}" "origin/${{ inputs.work_branch }}"
+          ls docs/specs/SPEC-*.md >/dev/null 2>&1 || { echo "::error::no docs/specs/SPEC-*.md on '${{ inputs.work_branch }}' — run fsd-to-spec first."; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PIPELINE_REPO }}
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/stage-4-spec-review.md
+          config: ${{ needs.config.outputs.cfg }}
+          expect: docs/specs
+      - name: Commit reviewed specs (+ REVIEW.md) to the work branch
+        run: |
+          set -euo pipefail
+          git add docs/specs
+          if git diff --cached --quiet; then echo "no spec-review changes to commit"; exit 0; fi
+          git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
+            commit -m 'pipeline(spec-review): review specs vs .claude/rules, apply corrections (+ REVIEW.md)'
+          git push origin "HEAD:${{ inputs.work_branch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: specs-reviewed
+          path: docs/specs
+          if-no-files-found: warn
+
+  # ── open ONE PR (head = work branch) with HLD + FSD + reviewed Specs ──────────
   open-pr:
-    needs: [config, brd-to-hld, hld-to-fsd, fsd-to-spec]
-    if: ${{ !cancelled() && needs.fsd-to-spec.result == 'success' }}
+    needs: [config, brd-to-hld, hld-to-fsd, fsd-to-spec, spec-review]
+    if: ${{ !cancelled() && needs.spec-review.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
