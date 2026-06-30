@@ -1,0 +1,200 @@
+# feature-pipeline — STAGED workflow (on: workflow_call). Option A: one run, 3 sequential jobs,
+# one PR at the end. Each stage is its own bounded `claude -p` (small context, separate log, retryable):
+#   1) BRD -> HLD     2) HLD -> FSD (index + author)     3) FSD -> Specs
+# Stages pass docs/ between jobs via artifacts; the final job opens one PR (docs/hld + docs/fsd + docs/specs).
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        type: string
+        default: docs/pipeline.config.yml
+      pipeline_ref:
+        type: string
+        default: v1
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      FRAMEWORK_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PIPELINE_REPO: quanticjs/quanticjs-feature-pipeline
+
+jobs:
+  # ── merge config (package defaults <- consumer overrides) once, share to all stages ──
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      cfg: ${{ steps.m.outputs.cfg }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PIPELINE_REPO }}
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+      - id: m
+        run: |
+          set -euo pipefail
+          if [ -f "${{ inputs.config }}" ]; then
+            yq -o=json eval-all '. as $i ireduce ({}; . * $i)' .pipeline/config/pipeline.defaults.yml "${{ inputs.config }}" > /tmp/cfg.json
+          else
+            yq -o=json '.' .pipeline/config/pipeline.defaults.yml > /tmp/cfg.json
+          fi
+          echo "cfg=$(jq -c . /tmp/cfg.json)" >> "$GITHUB_OUTPUT"
+
+  # ── STAGE 1 — BRD -> HLD ─────────────────────────────────────────────────────
+  brd-to-hld:
+    needs: config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PIPELINE_REPO }}
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Checkout framework sources (optional stage-0 grounding)
+        run: |
+          set -euo pipefail
+          [ "$(echo '${{ needs.config.outputs.cfg }}' | jq -r '.framework.checkout // false')" = "true" ] || { echo "framework.checkout disabled"; exit 0; }
+          mkdir -p .framework
+          echo '${{ needs.config.outputs.cfg }}' | jq -r '.framework.repos[]?' | while read -r e; do
+            repo="${e%@*}"; ref="${e##*@}"; name="${repo##*/}"
+            git clone --depth=1 --branch "$ref" "https://x-access-token:${{ secrets.FRAMEWORK_TOKEN }}@github.com/${repo}.git" ".framework/${name}" \
+              || echo "::warning::could not clone ${repo} (HLD grounding falls back to .claude/rules)"
+          done
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/00-brd-to-hld.md
+          config: ${{ needs.config.outputs.cfg }}
+          extra: framework_dir=.framework
+          expect: docs/hld
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hld
+          path: docs/hld
+          if-no-files-found: error
+
+  # ── STAGE 2 — HLD -> FSD (index + author) ────────────────────────────────────
+  hld-to-fsd:
+    needs: [config, brd-to-hld]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PIPELINE_REPO }}
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: hld
+          path: docs/hld
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/stage-2-hld-to-fsd.md
+          config: ${{ needs.config.outputs.cfg }}
+          expect: docs/fsd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsd
+          path: docs/fsd
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tracker
+          path: docs/specs
+          if-no-files-found: warn
+
+  # ── STAGE 3 — FSD -> Specs ───────────────────────────────────────────────────
+  fsd-to-spec:
+    needs: [config, hld-to-fsd]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PIPELINE_REPO }}
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: fsd
+          path: docs/fsd
+      - uses: actions/download-artifact@v4
+        with:
+          name: tracker
+          path: docs/specs
+        continue-on-error: true
+      - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/stage-3-fsd-to-spec.md
+          config: ${{ needs.config.outputs.cfg }}
+          expect: docs/specs
+      - name: Assert specs produced
+        run: |
+          n="$(ls docs/specs/SPEC-*.md 2>/dev/null | wc -l | tr -d ' ')"
+          echo "SPEC files produced: $n"
+          [ "$n" -gt 0 ] || { echo "::error::stage 3 produced no SPEC-*.md"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: specs
+          path: docs/specs
+          if-no-files-found: error
+
+  # ── open ONE PR with HLD + FSD + Specs ───────────────────────────────────────
+  open-pr:
+    needs: [brd-to-hld, hld-to-fsd, fsd-to-spec]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hld
+          path: docs/hld
+      - uses: actions/download-artifact@v4
+        with:
+          name: fsd
+          path: docs/fsd
+      - uses: actions/download-artifact@v4
+        with:
+          name: specs
+          path: docs/specs
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: pipeline/brd-run
+          title: 'pipeline: HLD + FSD + specs from BRD'
+          body: |
+            Generated by the staged feature-pipeline (BRD → HLD → FSD → specs).
+            Review `docs/hld`, `docs/fsd`, and `docs/specs` (numbered specs + TRACKER.md),
+            then implement in tracker order with /implement-spec.
+          add-paths: |
+            docs/hld/**
+            docs/fsd/**
+            docs/specs/**

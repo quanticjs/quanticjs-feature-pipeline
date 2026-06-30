@@ -22,6 +22,10 @@ inputs:
     description: Claude Code --allowedTools value
     required: false
     default: Edit,Write,Read,Bash,Glob,Grep,Task
+  expect:
+    description: Space-separated path(s) whose new/changed content proves this stage did work; the step fails if none changed.
+    required: false
+    default: docs/hld docs/fsd docs/specs
 outputs:
   json:
     description: The prompt's JSON output contract (parsed from the model's final message)
@@ -94,10 +98,10 @@ runs:
           echo "spec_plan=$(echo "$PAYLOAD" | jq -c '.spec_plan // empty')"
         } >> "$GITHUB_OUTPUT"
 
-        # Fail loud if nothing was produced under docs/ (so a no-op stops passing as success).
-        echo "::group::workspace docs changes after run"
-        git -C "$GITHUB_WORKSPACE" status --porcelain -- docs/ 2>/dev/null | head -60
-        N="$(git -C "$GITHUB_WORKSPACE" status --porcelain -- docs/hld docs/fsd docs/specs 2>/dev/null | wc -l | tr -d ' ')"
-        echo "docs/{hld,fsd,specs} changes: $N"
+        # Fail loud if this stage produced nothing under its expected path (no-op stops passing as success).
+        echo "::group::workspace changes after run"
+        git -C "$GITHUB_WORKSPACE" status --porcelain -- ${{ inputs.expect }} 2>/dev/null | head -80
+        N="$(git -C "$GITHUB_WORKSPACE" status --porcelain -- ${{ inputs.expect }} 2>/dev/null | wc -l | tr -d ' ')"
+        echo "changes under [${{ inputs.expect }}]: $N"
         echo "::endgroup::"
-        if [ "$N" = "0" ]; then echo "::error::Claude produced no docs/ output — see the claude log above (trust / tools / prompt)."; exit 1; fi
+        if [ "$N" = "0" ]; then echo "::error::Claude produced no output under [${{ inputs.expect }}] — see the claude log above (trust / tools / prompt)."; exit 1; fi
