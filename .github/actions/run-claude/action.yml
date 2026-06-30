@@ -44,9 +44,18 @@ runs:
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ env.CLAUDE_CODE_OAUTH_TOKEN }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
         ENGINE="$(echo '${{ inputs.config }}' | jq -r '.runner.engine // "claude-code-cli"')"
         MODEL="$(echo  '${{ inputs.config }}' | jq -r '.runner.model  // ""')"
+
+        echo "::group::run-claude setup"
+        echo "engine=$ENGINE  model=${MODEL:-<default>}  workspace=$GITHUB_WORKSPACE"
+        echo "ANTHROPIC_API_KEY present: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo yes || echo NO)"
+        echo "CLAUDE_CODE_OAUTH_TOKEN present: $([ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && echo yes || echo NO)"
+        claude --version || true
+        # Trust the workspace, else Claude Code ignores permissions and runs NO tools (writes nothing).
+        node -e 'const fs=require("fs"),os=require("os");const p=os.homedir()+"/.claude.json";let j={};try{j=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){};const w=process.env.GITHUB_WORKSPACE;j.projects=j.projects||{};j.projects[w]=Object.assign(j.projects[w]||{},{hasTrustDialogAccepted:true});fs.writeFileSync(p,JSON.stringify(j,null,2));console.log("trusted workspace:",w);'
+        echo "::endgroup::"
 
         # Assemble the full prompt = the stage prompt + the merged config + any extra context.
         {
@@ -56,17 +65,20 @@ runs:
           printf '%s\n' '${{ inputs.extra }}'
         } > /tmp/prompt.txt
 
+        PAYLOAD='{}'
         case "$ENGINE" in
           claude-code-cli)
-            # Headless print mode, JSON envelope. acceptEdits lets it write files into the workspace.
+            # Headless: skip permission prompts (workspace trusted above); high turn cap for multi-stage work.
             claude -p "$(cat /tmp/prompt.txt)" \
               ${MODEL:+--model "$MODEL"} \
-              --output-format json \
-              --permission-mode acceptEdits \
-              --allowedTools '${{ inputs.allowed_tools }}' \
-              > /tmp/out.json
-            RESULT="$(jq -r '.result // ""' /tmp/out.json)"
-            PAYLOAD="$(printf '%s' "$RESULT" | grep -ozP '(?s)\{.*\}' | tr -d '\0' || echo '{}')"
+              --output-format json --verbose --max-turns 300 \
+              --dangerously-skip-permissions \
+              > /tmp/out.json 2>/tmp/err.log
+            rc=$?
+            echo "::group::claude output (exit=$rc)"; tail -c 6000 /tmp/out.json 2>/dev/null; echo; echo "--- stderr (tail) ---"; tail -60 /tmp/err.log 2>/dev/null; echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then echo "::error::claude exited $rc"; exit "$rc"; fi
+            RESULT="$(jq -r '.result // ""' /tmp/out.json 2>/dev/null)"
+            PAYLOAD="$(printf '%s' "$RESULT" | grep -ozP '(?s)\{.*\}' | tr -d '\0' 2>/dev/null || echo '{}')"
             ;;
           claude-code-action)
             echo "TODO: delegate to anthropics/claude-code-action and read its result file"; PAYLOAD='{}' ;;
@@ -81,3 +93,11 @@ runs:
           echo "batches=$(echo "$PAYLOAD"   | jq -c '.batches   // empty')"
           echo "spec_plan=$(echo "$PAYLOAD" | jq -c '.spec_plan // empty')"
         } >> "$GITHUB_OUTPUT"
+
+        # Fail loud if nothing was produced under docs/ (so a no-op stops passing as success).
+        echo "::group::workspace docs changes after run"
+        git -C "$GITHUB_WORKSPACE" status --porcelain -- docs/ 2>/dev/null | head -60
+        N="$(git -C "$GITHUB_WORKSPACE" status --porcelain -- docs/hld docs/fsd docs/specs 2>/dev/null | wc -l | tr -d ' ')"
+        echo "docs/{hld,fsd,specs} changes: $N"
+        echo "::endgroup::"
+        if [ "$N" = "0" ]; then echo "::error::Claude produced no docs/ output — see the claude log above (trust / tools / prompt)."; exit 1; fi
