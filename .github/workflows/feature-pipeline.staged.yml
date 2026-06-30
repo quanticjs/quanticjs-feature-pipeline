@@ -1,7 +1,11 @@
-# feature-pipeline — STAGED workflow (on: workflow_call). Option A: one run, 3 sequential jobs,
-# one PR at the end. Each stage is its own bounded `claude -p` (small context, separate log, retryable):
-#   1) BRD -> HLD     2) HLD -> FSD (index + author)     3) FSD -> Specs
-# Stages pass docs/ between jobs via artifacts; the final job opens one PR (docs/hld + docs/fsd + docs/specs).
+# feature-pipeline — STAGED workflow (on: workflow_call). 3 sequential stages, RESUMABLE:
+#   1) BRD -> HLD     2) HLD -> FSD     3) FSD -> Specs
+# Each stage reads the previous stage's output from a persistent WORK BRANCH (inputs.work_branch)
+# and commits its own output back to it. Any stage can therefore be re-run independently via
+# `start_stage` WITHOUT rerunning earlier stages — the prior output is read from the branch, not
+# from same-run artifacts. `start_stage` is the ENTRY point: that stage and everything after it run.
+# One PR (head = the work branch) collects docs/hld + docs/fsd + docs/specs and auto-updates as
+# stages push to the branch.
 
 on:
   workflow_call:
@@ -12,6 +16,14 @@ on:
       pipeline_ref:
         type: string
         default: v1
+      start_stage:
+        description: 'Entry stage: brd-to-hld | hld-to-fsd | fsd-to-spec. Earlier stages are skipped; their output is read from the work branch.'
+        type: string
+        default: brd-to-hld
+      work_branch:
+        description: 'Persistent branch that carries docs between stages and is the PR head.'
+        type: string
+        default: pipeline/brd-run
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -24,11 +36,16 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialize runs that target the same work branch so concurrent stages can't clobber it.
+concurrency:
+  group: feature-pipeline-${{ inputs.work_branch }}
+  cancel-in-progress: false
+
 env:
   PIPELINE_REPO: quanticjs/quanticjs-feature-pipeline
 
 jobs:
-  # ── merge config (package defaults <- consumer overrides) once, share to all stages ──
+  # ── merge config (package defaults <- consumer overrides) once; validate start_stage ──
   config:
     runs-on: ubuntu-latest
     outputs:
@@ -40,6 +57,13 @@ jobs:
           repository: ${{ env.PIPELINE_REPO }}
           ref: ${{ inputs.pipeline_ref }}
           path: .pipeline
+      - name: Validate start_stage
+        run: |
+          set -euo pipefail
+          case "${{ inputs.start_stage }}" in
+            brd-to-hld|hld-to-fsd|fsd-to-spec) echo "start_stage=${{ inputs.start_stage }}" ;;
+            *) echo "::error::invalid start_stage '${{ inputs.start_stage }}' (expected brd-to-hld | hld-to-fsd | fsd-to-spec)"; exit 1 ;;
+          esac
       - id: m
         run: |
           set -euo pipefail
@@ -53,9 +77,22 @@ jobs:
   # ── STAGE 1 — BRD -> HLD ─────────────────────────────────────────────────────
   brd-to-hld:
     needs: config
+    if: ${{ !cancelled() && needs.config.result == 'success' && inputs.start_stage == 'brd-to-hld' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check out (or create) the work branch
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.work_branch }}" || true
+          if git rev-parse --verify "origin/${{ inputs.work_branch }}" >/dev/null 2>&1; then
+            git checkout -B "${{ inputs.work_branch }}" "origin/${{ inputs.work_branch }}"
+          else
+            echo "work branch does not exist yet — creating it from the triggering ref"
+            git checkout -B "${{ inputs.work_branch }}"
+          fi
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.PIPELINE_REPO }}
@@ -83,18 +120,38 @@ jobs:
           config: ${{ needs.config.outputs.cfg }}
           extra: framework_dir=.framework
           expect: docs/hld
+      - name: Commit HLD to the work branch
+        run: |
+          set -euo pipefail
+          git add docs/hld
+          if git diff --cached --quiet; then echo "no HLD changes to commit"; exit 0; fi
+          git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
+            commit -m 'pipeline(brd-to-hld): generate docs/hld'
+          git push origin "HEAD:${{ inputs.work_branch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: hld
           path: docs/hld
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # ── STAGE 2 — HLD -> FSD (index + author) ────────────────────────────────────
   hld-to-fsd:
     needs: [config, brd-to-hld]
+    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.brd-to-hld.result == 'success' || needs.brd-to-hld.result == 'skipped') && (inputs.start_stage == 'brd-to-hld' || inputs.start_stage == 'hld-to-fsd') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check out the work branch (must exist; carries docs/hld)
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.work_branch }}" || true
+          if ! git rev-parse --verify "origin/${{ inputs.work_branch }}" >/dev/null 2>&1; then
+            echo "::error::work branch '${{ inputs.work_branch }}' not found — run the brd-to-hld stage first."; exit 1
+          fi
+          git checkout -B "${{ inputs.work_branch }}" "origin/${{ inputs.work_branch }}"
+          [ -d docs/hld ] && [ -n "$(ls -A docs/hld 2>/dev/null)" ] || { echo "::error::docs/hld missing on '${{ inputs.work_branch }}' — run brd-to-hld first."; exit 1; }
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.PIPELINE_REPO }}
@@ -103,10 +160,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - uses: actions/download-artifact@v4
-        with:
-          name: hld
-          path: docs/hld
       - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -115,23 +168,38 @@ jobs:
           prompt: .pipeline/prompts/stage-2-hld-to-fsd.md
           config: ${{ needs.config.outputs.cfg }}
           expect: docs/fsd
+      - name: Commit FSD (+ tracker) to the work branch
+        run: |
+          set -euo pipefail
+          git add docs/fsd docs/specs 2>/dev/null || true
+          if git diff --cached --quiet; then echo "no FSD changes to commit"; exit 0; fi
+          git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
+            commit -m 'pipeline(hld-to-fsd): generate docs/fsd (+ tracker)'
+          git push origin "HEAD:${{ inputs.work_branch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: fsd
           path: docs/fsd
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tracker
-          path: docs/specs
           if-no-files-found: warn
 
   # ── STAGE 3 — FSD -> Specs ───────────────────────────────────────────────────
   fsd-to-spec:
     needs: [config, hld-to-fsd]
+    if: ${{ !cancelled() && needs.config.result == 'success' && (needs.hld-to-fsd.result == 'success' || needs.hld-to-fsd.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check out the work branch (must exist; carries docs/fsd)
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ inputs.work_branch }}" || true
+          if ! git rev-parse --verify "origin/${{ inputs.work_branch }}" >/dev/null 2>&1; then
+            echo "::error::work branch '${{ inputs.work_branch }}' not found — run earlier stages first."; exit 1
+          fi
+          git checkout -B "${{ inputs.work_branch }}" "origin/${{ inputs.work_branch }}"
+          [ -d docs/fsd ] && [ -n "$(ls -A docs/fsd 2>/dev/null)" ] || { echo "::error::docs/fsd missing on '${{ inputs.work_branch }}' — run hld-to-fsd first."; exit 1; }
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.PIPELINE_REPO }}
@@ -140,15 +208,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - uses: actions/download-artifact@v4
-        with:
-          name: fsd
-          path: docs/fsd
-      - uses: actions/download-artifact@v4
-        with:
-          name: tracker
-          path: docs/specs
-        continue-on-error: true
       - uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -159,42 +218,44 @@ jobs:
           expect: docs/specs
       - name: Assert specs produced
         run: |
+          set -euo pipefail
           n="$(ls docs/specs/SPEC-*.md 2>/dev/null | wc -l | tr -d ' ')"
           echo "SPEC files produced: $n"
           [ "$n" -gt 0 ] || { echo "::error::stage 3 produced no SPEC-*.md"; exit 1; }
+      - name: Commit specs to the work branch
+        run: |
+          set -euo pipefail
+          git add docs/specs
+          if git diff --cached --quiet; then echo "no spec changes to commit"; exit 0; fi
+          git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
+            commit -m 'pipeline(fsd-to-spec): generate docs/specs (numbered specs + TRACKER.md)'
+          git push origin "HEAD:${{ inputs.work_branch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: specs
           path: docs/specs
-          if-no-files-found: error
+          if-no-files-found: warn
 
-  # ── open ONE PR with HLD + FSD + Specs ───────────────────────────────────────
+  # ── open ONE PR (head = work branch) with HLD + FSD + Specs ───────────────────
   open-pr:
-    needs: [brd-to-hld, hld-to-fsd, fsd-to-spec]
+    needs: [config, brd-to-hld, hld-to-fsd, fsd-to-spec]
+    if: ${{ !cancelled() && needs.fsd-to-spec.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
         with:
-          name: hld
-          path: docs/hld
-      - uses: actions/download-artifact@v4
-        with:
-          name: fsd
-          path: docs/fsd
-      - uses: actions/download-artifact@v4
-        with:
-          name: specs
-          path: docs/specs
-      - uses: peter-evans/create-pull-request@v6
-        with:
-          branch: pipeline/brd-run
-          title: 'pipeline: HLD + FSD + specs from BRD'
-          body: |
-            Generated by the staged feature-pipeline (BRD → HLD → FSD → specs).
-            Review `docs/hld`, `docs/fsd`, and `docs/specs` (numbered specs + TRACKER.md),
-            then implement in tracker order with /implement-spec.
-          add-paths: |
-            docs/hld/**
-            docs/fsd/**
-            docs/specs/**
+          ref: ${{ inputs.work_branch }}
+          fetch-depth: 0
+      - name: Open or update the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${{ github.event.repository.default_branch }}"
+          if gh pr view "${{ inputs.work_branch }}" --json number >/dev/null 2>&1; then
+            echo "PR for '${{ inputs.work_branch }}' already open — the new commits update it automatically."
+          else
+            gh pr create --head "${{ inputs.work_branch }}" --base "$base" \
+              --title 'pipeline: HLD + FSD + specs from BRD' \
+              --body $'Generated by the staged feature-pipeline (BRD → HLD → FSD → specs).\n\nReview `docs/hld`, `docs/fsd`, and `docs/specs` (numbered specs + TRACKER.md), then implement in tracker order with /implement-spec.\n\nEach stage is resumable: re-run a single stage with the `start_stage` input — it reads prior output from this branch.'
+          fi
