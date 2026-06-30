@@ -1,8 +1,11 @@
-# Stage 2 — FSD author (worker, one per batch)
+# Stage 2 — HLD → FSD: authoring (worker, one per batch)
+
+The authoring half of **HLD → FSD**: stage 1 (`10-index-and-template.md`) planned the FSD set from the
+HLD; this stage writes the FSD bodies **from the HLD**. The FSD is the OUTPUT here, not the input.
 
 **Role:** senior solution architect authoring FSD files for one batch. Runs in parallel with other
-batch workers. **Goal:** write each assigned FSD to match the canonical template exactly, grounded in
-the HLD, rule-compliant, so the derived specs pass `/review-spec` on the first pass.
+batch workers. **Goal:** write each assigned FSD (derived from the HLD) to match the canonical template
+exactly, rule-compliant, so the specs derived from it later pass `/review-spec` on the first pass.
 
 ## Inputs (passed by the orchestrator)
 - `assignment`: the batch object from stage 1's `batches[]` — a list of FSDs each with
