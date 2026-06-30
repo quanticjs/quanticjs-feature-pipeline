@@ -56,6 +56,13 @@ runs:
         echo "engine=$ENGINE  model=${MODEL:-<default>}  workspace=$GITHUB_WORKSPACE"
         echo "ANTHROPIC_API_KEY present: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo yes || echo NO)"
         echo "CLAUDE_CODE_OAUTH_TOKEN present: $([ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && echo yes || echo NO)"
+        # Prefer subscription auth when an OAuth token is provided. With BOTH set, the CLI selects
+        # ANTHROPIC_API_KEY (apiKeySource), so a depleted API account fails even though a valid token
+        # exists. Drop the API key so the token wins — set only one to switch billing back.
+        if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+          echo "auth: CLAUDE_CODE_OAUTH_TOKEN present -> ignoring ANTHROPIC_API_KEY (subscription billing)"
+          unset ANTHROPIC_API_KEY
+        fi
         claude --version || true
         # Trust the workspace, else Claude Code ignores permissions and runs NO tools (writes nothing).
         node -e 'const fs=require("fs"),os=require("os");const p=os.homedir()+"/.claude.json";let j={};try{j=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){};const w=process.env.GITHUB_WORKSPACE;j.projects=j.projects||{};j.projects[w]=Object.assign(j.projects[w]||{},{hasTrustDialogAccepted:true});fs.writeFileSync(p,JSON.stringify(j,null,2));console.log("trusted workspace:",w);'
