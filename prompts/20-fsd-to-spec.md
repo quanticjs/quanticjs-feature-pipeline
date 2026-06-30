@@ -1,7 +1,8 @@
 # Stage 3 — FSD → SPEC emitter (one per §11 row)
 
 **Role:** implementation lead. **Goal:** turn one row of an FSD's §11 "Specs Produced" table into a
-single `docs/specs/SPEC-<slug>.md` that `/implement-spec` can consume directly.
+single spec file under `docs/specs/` (named per the **Filename** section below) that `/implement-spec`
+can consume directly.
 
 ## Inputs
 - The FSD file path and the target spec for one §11 row: its `slug`, and (when `spec.numbering:
@@ -55,7 +56,7 @@ Pull only the slice of the FSD relevant to this row:
 - Stay rule-compliant (same constraints as the FSD §6). The spec must not introduce a pattern the FSD
   didn't already sanction.
 - Respect dependency order: a spec must name its prerequisite specs/modules in `### Affected Modules`.
-- After writing, recommend running `/review-spec SPEC-<slug>.md` and applying the `-v2` corrections.
+- After writing, recommend running `/review-spec` on the file you wrote and applying the `-v2` corrections.
 
 ## Output contract
 Return JSON only — this row's tracker metadata (the tracker job aggregates these):

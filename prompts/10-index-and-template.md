@@ -1,11 +1,14 @@
 # Stage 1 — HLD → FSD index & template (orchestrator)
 
-**Role:** senior solution architect. **Goal:** read an HLD and produce (a) the canonical FSD template
-and (b) the FSD index that drives stage-2 authoring. You DO NOT write individual FSD bodies here.
+**Role:** senior solution architect. **Goal:** read an HLD and produce (a) the canonical FSD template,
+(b) the FSD index that drives stage-2 authoring, (c) the build-order spec numbering plan (`spec_plan`),
+and (d) the seeded tracker. You DO NOT write individual FSD bodies here.
 
 ## Inputs
 - The HLD markdown file (path passed in).
-- `docs/pipeline/pipeline.config.yml` — apply `fsd.*` as fixed decisions (do not re-ask).
+- The merged pipeline **`config`** (provided in the CONTEXT block appended to this prompt — the package
+  `config/pipeline.defaults.yml` overridden by the consumer's `docs/pipeline.config.yml`). Apply `fsd.*`
+  and `spec.*` as fixed decisions (do not re-ask).
 - `.claude/rules/*.md` and `CLAUDE.md` — the architecture rules the FSD technical designs must obey.
 
 ## Decisions (from config — do not deviate)
@@ -39,7 +42,8 @@ and (b) the FSD index that drives stage-2 authoring. You DO NOT write individual
      `requireCurrentUser`, `TenantBaseEntity`/RLS, outbox + idempotent consumers, multi-issuer
      `@Population` auth, adapters with breaker/no-retry-on-4xx, frontend `@quanticjs/*` only,
      observability + ≥7yr retention) — pulled from `.claude/rules/`.
-   - Identifier conventions (`FSD-NN`, `FR-N`, `AC-N` checkboxes, `SPEC-<slug>`).
+   - Identifier conventions (`FSD-NN`, `FR-N`, `AC-N` checkboxes, and specs as `SPEC-NNN-<slug>` when
+     `spec.numbering: build-order`, else `SPEC-<slug>`).
    - The FSD→SPEC conversion workflow (run `/specify` or hand-author per §11 row → `/review-spec` →
      `/implement-spec`, respecting dependency order).
    - A critical-path / build-sequence diagram.
