@@ -81,7 +81,12 @@ runs:
             rc=$?
             echo "::group::claude output (exit=$rc)"; tail -c 6000 /tmp/out.json 2>/dev/null; echo; echo "--- stderr (tail) ---"; tail -60 /tmp/err.log 2>/dev/null; echo "::endgroup::"
             if [ "$rc" -ne 0 ]; then echo "::error::claude exited $rc"; exit "$rc"; fi
-            RESULT="$(jq -r '.result // ""' /tmp/out.json 2>/dev/null)"
+            # `--output-format json --verbose` writes a JSON ARRAY of stream events (the final
+            # element is the result object), so `.result` on the top level is a jq runtime error
+            # (exit 5) that aborts the whole step under `set -e`. Pull `.result` from the last
+            # result event; tolerate the plain-object shape; never abort on a parse hiccup (fall
+            # through to the "produced no output" guard below for a clear message instead).
+            RESULT="$(jq -r 'if type=="array" then ([.[] | select(.type? == "result")] | last | .result) else .result end // ""' /tmp/out.json 2>/dev/null || echo "")"
             PAYLOAD="$(printf '%s' "$RESULT" | grep -ozP '(?s)\{.*\}' | tr -d '\0' 2>/dev/null || echo '{}')"
             ;;
           claude-code-action)
