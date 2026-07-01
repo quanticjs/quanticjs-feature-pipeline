@@ -30,6 +30,24 @@ spec:
   #   SPEC-NNN-<slug>.md (e.g. SPEC-001-backend-bootstrap.md). 'none' = bare SPEC-<slug>.md.
   numbering: build-order                # build-order | none
   tracker: true                         # also write/maintain docs/specs/TRACKER.md (status + deps index)
+  # Size budget — keeps each spec to ONE /implement-spec pass. Rows exceeding a limit must be split
+  # (a product family becomes BPMN-wiring + details-schema + product-DMN + page specs, not one epic).
+  size_budget:
+    max_acs: 8                          # acceptance criteria per spec
+    max_subskills: 5                    # /implement-spec sub-skills per spec
+    max_depends_on: 6                   # prerequisite specs a single spec may depend on
+
+# Stage 2.5 — BRD → domain dictionary (docs/domain/*): the concrete decision content
+# (field schemas, DMN rows, message field maps, GL codes, checklists, SLA matrices) that
+# /implement-spec is forbidden to guess. Extract from the BRD/standards or emit TODO(domain-input).
+domain:
+  enabled: true                         # write docs/domain/* before FSD authoring
+  never_invent: true                    # missing bank-specific values become TODO(domain-input), never guesses
+
+# Stage 5 — deterministic verification gate over the generated artifacts (writes docs/specs/VERIFY.md).
+verify:
+  enabled: true
+  fail_on_blocker: true                 # a BLOCKER finding means the run is not "done"
 
 gates:
   mode: pr-per-stage                    # pr-per-stage | autopilot (autopilot safe for stage 1 only)
@@ -41,6 +59,8 @@ gates:
 
 # QuanticJS platform sources the BRD→HLD stage grounds in (stage 0 only).
 framework:
+  require: true                         # HARD-FAIL stage 0 if no framework sources on disk (no guessed symbols).
+                                        #   set false only to allow a rules-only HLD (prints an UNVERIFIED banner).
   checkout: true                        # in CI, check these repos out read-only for stage 0
   repos:                                # owner/repo @ ref — adjust owners to your org
     - quanticjs/quanticjs-backend@main
@@ -63,6 +83,7 @@ paths:
   brd_dir: docs/brd
   hld_dir: docs/hld
   fsd_dir: docs/fsd
+  domain_dir: docs/domain               # Stage 2.5 concrete decision content (field schemas, DMN rows, message maps, codes)
   spec_dir: docs/specs
   rules_dir: .claude/rules              # the quanticjs-standards rules every QuanticJS repo carries
   config: docs/pipeline.config.yml      # the consumer's override file

@@ -18,7 +18,12 @@ and (d) the seeded tracker. You DO NOT write individual FSD bodies here.
 - **Template** = `fsd.template` (`spec-aligned-traceability`): the template MUST contain the exact
   sections `/implement-spec` consumes — `Problem`, `Solution`, `Acceptance Criteria`, `Technical
   Design` → `Affected Modules` / `Data Model Changes` / `API Changes` / `Events`, `Edge Cases`,
-  `Test Plan` — plus a traceability table and a §11 "Specs Produced" table.
+  `Test Plan` — plus a traceability table, a **§6.6 Domain Inputs** subsection (references into
+  `docs/domain/*` for every concrete value the FSD consumes, or `TODO(domain-input)` lines), and a
+  §11 "Specs Produced" table.
+- **Spec size budget** = `spec.size_budget` (`max_acs`/`max_subskills`/`max_depends_on`): the §11 rows you
+  plan and the spec numbers you assign must keep each spec within budget. A product's end-to-end flow is
+  NOT one spec — split it (BPMN-wiring / `details`-schema / product-DMN-config / page rows).
 - **Numbering** = `fsd.numbering` (`banded`): foundation 00–09, subprocess 10–19, capability 20–29,
   product 30–39. Leave gaps as headroom; never couple the number to insertion order.
 
@@ -26,7 +31,11 @@ and (d) the seeded tracker. You DO NOT write individual FSD bodies here.
 
 1. **Write `docs/fsd/_TEMPLATE.md`** — the canonical template. Every section present and ordered; each
    with a one-line instruction comment; `§6.1–6.4` are the four `/implement-spec` subsections and are
-   mandatory. (If a `_TEMPLATE.md` already exists and matches the config, reuse it.)
+   mandatory. Add a mandatory **`### 6.6 Domain Inputs`** subsection: for every typed input the unit
+   consumes (product `details` fields+types, DMN rows, MT/message field maps, accounting/GL codes,
+   checklists, SLA rows) list the `docs/domain/*` file that holds the concrete values, or a
+   `TODO(domain-input): <what's missing> (owner: <role>)` line — naming an input without a value/reference
+   is incomplete. (If a `_TEMPLATE.md` already exists and matches the config, reuse it.)
 
 2. **Derive the FSD catalog from the HLD.** Walk the HLD's container/module diagram, its shared
    sub-process library, its capability sections, and its product list. Produce one catalog row per FSD
@@ -58,6 +67,9 @@ and (d) the seeded tracker. You DO NOT write individual FSD bodies here.
    001, 002, 003 … across the whole program (foundation first, then sub-process/capability, then
    product). Emit this as `spec_plan` so stage 3 names files `SPEC-<number>-<slug>.md` deterministically.
    (Note: the FSD §11 "specs produced" rows are estimates from this same pass; keep them consistent.)
+   **Apply the size budget while planning:** a product family is several build-order specs, not one — plan
+   the split (thin-BPMN wiring, typed `details` schema, product DMN/config, page) as separate numbered
+   rows so no single spec pulls a 10-deep `depends_on` or a whole end-to-end flow.
 
 6. **Seed the tracker** (when `spec.tracker: true`): write `docs/specs/TRACKER.md` with the status
    legend (☐/🔄/✅/🚫), a progress roll-up per layer, and one row per planned spec

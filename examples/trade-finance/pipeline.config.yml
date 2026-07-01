@@ -5,9 +5,24 @@
 runner:
   model: claude-opus-4-8        # pin a model for reproducibility
 
-# Trade Finance happened to use every default as-is (module-subprocess-hybrid, spec-aligned,
-# generate-all, banded, 6 authors). It produced 25 FSDs → 92 specs.
-# See ./reference-run.md for the exact decomposition and the verbatim author assignments.
+# Trade Finance uses the decomposition defaults as-is (module-subprocess-hybrid, spec-aligned,
+# generate-all, banded, 6 authors). See ./reference-run.md for the decomposition + author assignments.
+
+# Stage 0 grounding — in CI, clone the framework repos (needs FRAMEWORK_TOKEN); locally, set
+# framework.local_paths to the repos on disk. require: true hard-fails rather than guess symbols.
+framework:
+  require: true
+  checkout: true
+  # local_paths:                         # for local driver runs, point at your clones:
+  #   - /abs/path/to/quanticjs-backend
+  #   - /abs/path/to/quanticjs-ui
+  #   - /abs/path/to/quanticflow
+  #   - /abs/path/to/notification-engine
+  #   - /abs/path/to/file-service
+
+# domain/verify/spec.size_budget default ON in pipeline.defaults.yml — listed here for visibility.
+domain: { enabled: true, never_invent: true }
+verify: { enabled: true, fail_on_blocker: true }
 
 gates:
   mode: pr-per-stage

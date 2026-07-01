@@ -5,14 +5,23 @@ product repo. The engine lives here once; product repos reference it via a one-f
 caller. **Upload a BRD → the whole chain runs end-to-end.**
 
 ```
-docs/brd/** uploaded ─► BRD→HLD ─► HLD→FSD index ─► FSD authoring ─► one "HLD + FSD" PR
-   merge that PR (docs/fsd/**) ─► FSD→SPEC ─► specs PR
+docs/brd/** uploaded ─► BRD→HLD ─► HLD→FSD index ─► BRD→domain dict ─► FSD authoring ─► one "HLD + FSD" PR
+   merge that PR (docs/fsd/**) ─► FSD→SPEC ─► deterministic VERIFY gate ─► specs PR
       merge specs PR ─► (manual) /implement-spec per spec, dependency-ordered ─► code
 ```
 
 Stage 0 (BRD→HLD) is **grounded in the actual QuanticJS framework repos** (`quanticjs-backend`,
 `quanticjs-ui`, `quanticflow`, `notification-engine`, file service) so the HLD reflects real platform
-capabilities, not guesses.
+capabilities, not guesses. With `framework.require: true` (default) the run **hard-fails** rather than
+emit an HLD built on recalled/unverified framework symbols.
+
+**Concrete decision content (`docs/domain/*`).** Stage 2.5 mines the BRD for the actual field schemas,
+DMN rows, SWIFT/message field maps, GL codes, checklists and SLA matrices — the values `/implement-spec`
+is forbidden to guess — and FSDs/specs reference them by path. Bank-specific values the BRD doesn't
+supply become explicit `TODO(domain-input)` items (a surfaced, assignable gap) instead of silent
+hallucinations at build time. Stage 5 then runs a **deterministic VERIFY gate** (cross-ref integrity,
+dependency monotonicity, single module owner, shared-flow consistency, no terminal deferral, size budget)
+and blocks the run on any BLOCKER.
 
 ## Repo layout
 
@@ -21,7 +30,7 @@ capabilities, not guesses.
 .github/workflows/feature-pipeline.reusable.yml   on: workflow_call — multi-job matrix engine (scaled)
 .github/actions/run-claude/                        headless runner (claude-code-cli implemented; API key or OAuth)
 .github/actions/verify-fsd/                         structural gate (required /implement-spec sections)
-prompts/   driver · 00-brd-to-hld · 10-index-and-template · 11-fsd-author · 20-fsd-to-spec   (all domain-agnostic)
+prompts/   driver · 00-brd-to-hld · 10-index-and-template · 15-domain-dictionary · 11-fsd-author · 20-fsd-to-spec · 30-verify   (all domain-agnostic)
 templates/_TEMPLATE.fsd.md                          canonical FSD template seed
 config/pipeline.defaults.yml                        defaults (decomposition, gates, framework, spec numbering/tracker, runner, paths)
 examples/

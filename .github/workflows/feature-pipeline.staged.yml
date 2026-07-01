@@ -168,13 +168,13 @@ jobs:
           prompt: .pipeline/prompts/stage-2-hld-to-fsd.md
           config: ${{ needs.config.outputs.cfg }}
           expect: docs/fsd
-      - name: Commit FSD (+ tracker) to the work branch
+      - name: Commit FSD (+ tracker + domain dict) to the work branch
         run: |
           set -euo pipefail
-          git add docs/fsd docs/specs 2>/dev/null || true
+          git add docs/fsd docs/specs docs/domain 2>/dev/null || true
           if git diff --cached --quiet; then echo "no FSD changes to commit"; exit 0; fi
           git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
-            commit -m 'pipeline(hld-to-fsd): generate docs/fsd (+ tracker)'
+            commit -m 'pipeline(hld-to-fsd): generate docs/fsd (+ tracker + domain dictionary)'
           git push origin "HEAD:${{ inputs.work_branch }}"
       - uses: actions/upload-artifact@v4
         with:
@@ -270,14 +270,32 @@ jobs:
           prompt: .pipeline/prompts/stage-4-spec-review.md
           config: ${{ needs.config.outputs.cfg }}
           expect: docs/specs
-      - name: Commit reviewed specs (+ REVIEW.md) to the work branch
+      - name: Deterministic verify gate (writes docs/specs/VERIFY.md)
+        if: ${{ fromJSON(needs.config.outputs.cfg).verify.enabled }}
+        uses: quanticjs/quanticjs-feature-pipeline/.github/actions/run-claude@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          prompt: .pipeline/prompts/30-verify.md
+          config: ${{ needs.config.outputs.cfg }}
+          expect: docs/specs
+      - name: Commit reviewed specs (+ REVIEW.md + VERIFY.md) to the work branch
         run: |
           set -euo pipefail
           git add docs/specs
           if git diff --cached --quiet; then echo "no spec-review changes to commit"; exit 0; fi
           git -c user.name='feature-pipeline[bot]' -c user.email='feature-pipeline@users.noreply.github.com' \
-            commit -m 'pipeline(spec-review): review specs vs .claude/rules, apply corrections (+ REVIEW.md)'
+            commit -m 'pipeline(spec-review): review specs vs .claude/rules + verify gate (+ REVIEW.md, VERIFY.md)'
           git push origin "HEAD:${{ inputs.work_branch }}"
+      - name: Enforce verify gate — GATE FAIL blocks the run
+        if: ${{ fromJSON(needs.config.outputs.cfg).verify.enabled && fromJSON(needs.config.outputs.cfg).verify.fail_on_blocker }}
+        run: |
+          set -euo pipefail
+          if grep -q 'GATE: FAIL' docs/specs/VERIFY.md 2>/dev/null; then
+            echo "::error::deterministic verify gate FAILED — see docs/specs/VERIFY.md on branch ${{ inputs.work_branch }}"; exit 1
+          fi
+          echo "verify gate passed (or VERIFY.md absent)"
       - uses: actions/upload-artifact@v4
         with:
           name: specs-reviewed

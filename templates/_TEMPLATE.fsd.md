@@ -18,7 +18,10 @@ Replace every <angle-bracket> placeholder. An empty section means the FSD is inc
 | **Depends on** | <FSD-.. / —> |
 
 ## 1. Problem
-<Why this unit exists, in business terms. The pain/requirement from the BRD/HLD it resolves.>
+<Why this unit exists, in business terms. The pain/requirement from the BRD/HLD it resolves.
+For a Product FSD, assert the reuse invariant: it adds NO new backend module, entity/table, or adapter —
+its footprint is one thin BPMN + a typed `details` schema + product DMN/config + notification/document sets
++ one page. (Do NOT write "ZERO new framework code" — products do ship handlers/BPMN/DMN/pages.)>
 
 ## 2. Solution
 <What we are building, at a functional level. How it composes existing foundation/sub-process units.
@@ -62,6 +65,19 @@ interaction: BPMN sub-process/call-activity, service-task handlers, `WorkflowCom
 ### 6.5 Integrations
 <External systems touched (core systems / messaging / third-party APIs / File Service / Notification Engine / Keycloak), the
 adapter, resilience (timeout, breaker, retry, no-retry-on-4xx), idempotency keys, fail-closed state.>
+
+### 6.6 Domain Inputs (concrete values — never "typed inputs" without a home)
+<For EVERY typed input this unit consumes — product `details` fields+types, DMN rows, MT/message field
+maps, accounting/GL codes, document checklists, SLA/TAT rows — point at the `docs/domain/*` file that holds
+the concrete values (e.g. `see docs/domain/dmn/routing.dmn.yml`), or write a
+`TODO(domain-input): <exactly what value is missing> (owner: <role>)` line when neither the BRD nor a cited
+public standard supplies it. Naming an input without a value or a domain-file reference is an incomplete
+FSD — this is the section `/implement-spec` needs so it never has to guess a banking value.>
+
+| Typed input | Concrete source | Status |
+|---|---|---|
+| <e.g. Import-LC `details` schema> | `docs/domain/products/import-lc.details.yml` | ✅ in domain dict |
+| <e.g. Import-LC charge GL code> | — | ❌ TODO(domain-input) — owner: TFO finance |
 
 ## 7. Edge Cases & Failure Handling
 <Concrete failure modes and the handling: unauthenticated/expired/insufficient-permission; invalid input
